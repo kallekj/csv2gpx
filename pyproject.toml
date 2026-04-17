@@ -1,0 +1,110 @@
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "voxcpm-wyomming"
+version = "0.1.0"
+description = "Wyoming TCP text-to-speech service powered by VoxCPM."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+authors = [
+  { name = "VoxCPM Maintainers" }
+]
+keywords = ["python", "tooling", "docker", "quality"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Typing :: Typed"
+]
+dependencies = [
+  "numpy>=2.1.0",
+  "wyoming>=1.8.0"
+]
+
+[project.optional-dependencies]
+voxcpm = [
+  "nano-vllm-voxcpm>=2.0.0"
+]
+dev = [
+  "build>=1.2.2",
+  "mypy>=1.18.0",
+  "pre-commit>=4.3.0",
+  "pytest>=8.4.0",
+  "pytest-cov>=6.2.0",
+  "ruff>=0.13.0"
+]
+
+[project.urls]
+Repository = "https://example.com/voxcpm-wyomming"
+
+[project.scripts]
+voxcpm = "voxcpm_wyomming.__main__:main"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+  "E",
+  "F",
+  "I",
+  "B",
+  "UP",
+  "W"
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-markers --cov=voxcpm_wyomming --cov-report=term-missing --cov-fail-under=90"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["voxcpm_wyomming"]
+
+[tool.coverage.report]
+skip_covered = true
+show_missing = true
+
+[tool.mypy]
+python_version = "3.12"
+pretty = true
+show_error_codes = true
+strict = true
+files = ["src", "tests"]
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+
+[[tool.mypy.overrides]]
+module = [
+  "wyoming",
+  "wyoming.*",
+  "nanovllm_voxcpm",
+  "nanovllm_voxcpm.*"
+]
+ignore_missing_imports = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/voxcpm_wyomming"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/src",
+  "/tests",
+  "/README.md",
+  "/LICENSE",
+  "/Dockerfile",
+  "/.dockerignore"
+]

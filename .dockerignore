@@ -1,0 +1,25 @@
+# VCS and editor
+.git
+.gitignore
+.vscode
+
+# Python artifacts
+__pycache__
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# Environments and caches
+.venv
+.pytest_cache
+.mypy_cache
+.ruff_cache
+
+# Test and local outputs
+.coverage
+coverage.xml
+htmlcov
+dist
+build
+*.egg-info
