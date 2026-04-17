@@ -105,7 +105,6 @@ include = [
   "/src",
   "/tests",
   "/README.md",
-  "/LICENSE",
   "/Dockerfile",
   "/.dockerignore"
 ]
