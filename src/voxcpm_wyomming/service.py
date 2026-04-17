@@ -8,10 +8,23 @@ from collections.abc import Callable
 from wyoming.audio import AudioChunk, AudioFormat, AudioStart, AudioStop
 from wyoming.error import Error
 from wyoming.event import Event
-from wyoming.info import Attribution, Info, SndProgram, TtsProgram, TtsVoice, TtsVoiceSpeaker
-from wyoming.info import Describe
+from wyoming.info import (
+    Attribution,
+    Describe,
+    Info,
+    SndProgram,
+    TtsProgram,
+    TtsVoice,
+    TtsVoiceSpeaker,
+)
 from wyoming.server import AsyncEventHandler, AsyncServer
-from wyoming.tts import Synthesize, SynthesizeChunk, SynthesizeStart, SynthesizeStop, SynthesizeVoice
+from wyoming.tts import (
+    Synthesize,
+    SynthesizeChunk,
+    SynthesizeStart,
+    SynthesizeStop,
+    SynthesizeVoice,
+)
 
 from .adapter import VoxCPMAdapter
 from .audio import pcm_float32_to_int16_bytes
@@ -169,7 +182,9 @@ class VoxCPMWyomingEventHandler(AsyncEventHandler):
             if audio_started:
                 await self.write_event(AudioStop().event())
 
-            await self.write_event(Error(text=f"Synthesis failed: {err}", code="synthesis_failed").event())
+            await self.write_event(
+                Error(text=f"Synthesis failed: {err}", code="synthesis_failed").event()
+            )
 
 
 class VoxCPMWyomingService:

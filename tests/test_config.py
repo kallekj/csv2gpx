@@ -33,3 +33,29 @@ def test_config_from_args_validates_devices() -> None:
     args = parser.parse_args(["--model", "m", "--devices", "0,-1"])
     with pytest.raises(ValueError, match="non-negative"):
         config_from_args(args)
+
+
+def test_config_from_args_validates_empty_devices() -> None:
+    parser = build_arg_parser()
+    args = parser.parse_args(["--model", "m", "--devices", ",,,"])
+    with pytest.raises(ValueError, match="devices list is empty"):
+        config_from_args(args)
+
+
+def test_config_from_args_validates_port_range() -> None:
+    parser = build_arg_parser()
+    args = parser.parse_args(["--model", "m", "--port", "70000"])
+    with pytest.raises(ValueError, match="--port"):
+        config_from_args(args)
+
+
+def test_config_from_args_validates_batch_limits() -> None:
+    parser = build_arg_parser()
+
+    args_tokens = parser.parse_args(["--model", "m", "--max-num-batched-tokens", "0"])
+    with pytest.raises(ValueError, match="max-num-batched-tokens"):
+        config_from_args(args_tokens)
+
+    args_seqs = parser.parse_args(["--model", "m", "--max-num-seqs", "0"])
+    with pytest.raises(ValueError, match="max-num-seqs"):
+        config_from_args(args_seqs)
