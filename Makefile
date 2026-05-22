@@ -1,30 +1,33 @@
 SHELL := /bin/sh
 
-.PHONY: install format lint typecheck test check build docker-build
+.PHONY: install format lint typecheck test check build docker-build docker-run
 
 install:
 	uv sync --extra dev
 
 format:
-	uv run ruff format src tests
+	uv run --extra dev ruff format src tests
 
 lint:
-	uv run ruff check src tests
+	uv run --extra dev ruff check src tests
 
 typecheck:
-	uv run mypy
+	uv run --extra dev mypy
 
 test:
-	uv run pytest
+	uv run --extra dev pytest
 
 check:
-	uv run ruff format --check src tests
-	uv run ruff check src tests
-	uv run mypy
-	uv run pytest
+	uv run --extra dev ruff format --check src tests
+	uv run --extra dev ruff check src tests
+	uv run --extra dev mypy
+	uv run --extra dev pytest
 
 build:
 	uv build
 
 docker-build:
-	docker build --pull --target runtime -t voxcpm-wyomming:latest .
+	docker build --pull --target runtime -t csv2gpx:latest .
+
+docker-run:
+	docker run --rm -p 8000:8000 csv2gpx:latest

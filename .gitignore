@@ -25,3 +25,9 @@ dist/
 # IDE/OS
 .vscode/
 .DS_Store
+
+.csv
+.dat
+.DAT
+.xls
+.xlsx

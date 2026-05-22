@@ -16,6 +16,6 @@ repos:
     hooks:
       - id: pytest-fast
         name: pytest-fast
-        entry: uv run pytest -q
+        entry: uv run --extra dev pytest -q
         language: system
         pass_filenames: false

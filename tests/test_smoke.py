@@ -1,9 +1,15 @@
-from voxcpm_wyomming.__main__ import main
+import pytest
+
+from csv2gpx import __version__
+from csv2gpx.__main__ import main
 
 
-def test_main_requires_model() -> None:
-    assert main([]) == 2
+def test_version_is_defined() -> None:
+    assert __version__ == "0.1.0"
 
 
 def test_main_help_succeeds() -> None:
-    assert main(["--help"]) == 0
+    with pytest.raises(SystemExit) as exc_info:
+        main(["--help"])
+
+    assert exc_info.value.code == 0
