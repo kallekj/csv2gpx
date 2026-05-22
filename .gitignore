@@ -26,8 +26,8 @@ dist/
 .vscode/
 .DS_Store
 
-.csv
-.dat
-.DAT
-.xls
-.xlsx
+*.csv
+*.dat
+*.DAT
+*.xls
+*.xlsx
