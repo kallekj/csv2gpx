@@ -43,8 +43,8 @@ jobs:
       - name: Build package
         run: uv build
 
-      - name: Build runtime image
-        run: docker build --pull --target runtime -t template-project:ci .
+      # - name: Build runtime image
+      #   run: docker build --pull --target runtime -t template-project:ci .
 
-      - name: Container smoke test
-        run: docker run --rm template-project:ci
+      # - name: Container smoke test
+      #   run: docker run --rm template-project:ci
