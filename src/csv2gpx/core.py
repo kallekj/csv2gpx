@@ -13,18 +13,7 @@ from typing import TextIO
 
 GPX_NAMESPACE = "http://www.topografix.com/GPX/1/1"
 TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
-
-EXTENSION_COLUMNS = {
-    "sog_knots": "SOG",
-    "cog_degrees": "COG",
-    "depth_m": "Depth",
-    "water_temp_c": "WaterTemp",
-    "engine_rpm": "Engine1_RPM",
-    "fuel_rate_lph": "FuelRate1",
-    "engine_temp_c": "EngineTemp1",
-    "oil_pressure": "OilPressure1",
-    "coolant_pressure_kpa": "CoolantPressure1",
-}
+BASE_COLUMNS = {"Time", "Latitude", "Longitude"}
 
 
 @dataclass(frozen=True)
@@ -40,6 +29,8 @@ class TrackPoint:
 class LogData:
     source_name: str
     points: list[TrackPoint]
+    available_columns: list[ColumnInfo]
+    column_tags: dict[str, str]
 
     @property
     def start_time(self) -> datetime:
@@ -52,6 +43,14 @@ class LogData:
 
 class CsvLogError(ValueError):
     """Raised when an uploaded log cannot be parsed as a supported CSV log."""
+
+
+@dataclass(frozen=True)
+class ColumnInfo:
+    name: str
+    tag: str
+    numeric_count: int
+    selected: bool = True
 
 
 def safe_float(value: str | None) -> float | None:
@@ -84,6 +83,8 @@ def parse_csv_log_stream(handle: TextIO, source_name: str) -> LogData:
         missing_list = ", ".join(sorted(missing))
         raise CsvLogError(f"CSV file is missing required column(s): {missing_list}.")
 
+    candidates = [field for field in reader.fieldnames if field not in BASE_COLUMNS]
+    numeric_counts = dict.fromkeys(candidates, 0)
     points: list[TrackPoint] = []
     for index, row in enumerate(reader):
         lat = safe_float(row.get("Latitude"))
@@ -97,16 +98,38 @@ def parse_csv_log_stream(handle: TextIO, source_name: str) -> LogData:
         except ValueError as exc:
             raise CsvLogError(f"Invalid timestamp at CSV row {index + 2}: {raw_time}") from exc
 
-        values = {
-            extension_name: safe_float(row.get(column_name))
-            for extension_name, column_name in EXTENSION_COLUMNS.items()
-        }
+        values: dict[str, float | None] = {}
+        for column_name in candidates:
+            value = safe_float(row.get(column_name))
+            values[column_name] = value
+            if value is not None:
+                numeric_counts[column_name] += 1
         points.append(TrackPoint(index=index, time=point_time, lat=lat, lon=lon, values=values))
 
     if not points:
         raise CsvLogError("CSV file did not contain any usable GPS points.")
 
-    return LogData(source_name=source_name, points=points)
+    available_columns = [
+        ColumnInfo(name=name, tag="", numeric_count=count)
+        for name, count in numeric_counts.items()
+        if count > 0
+    ]
+    tag_by_name = unique_column_tags([column.name for column in available_columns])
+    available_columns = [
+        ColumnInfo(
+            name=column.name,
+            tag=tag_by_name[column.name],
+            numeric_count=column.numeric_count,
+        )
+        for column in available_columns
+    ]
+
+    return LogData(
+        source_name=source_name,
+        points=points,
+        available_columns=available_columns,
+        column_tags=tag_by_name,
+    )
 
 
 def track_points_between(
@@ -119,10 +142,23 @@ def track_points_between(
     return [point for point in log.points if start_utc <= point.time <= end_utc]
 
 
-def export_gpx(log: LogData, start_time: datetime, end_time: datetime) -> bytes:
+def export_gpx(
+    log: LogData,
+    start_time: datetime,
+    end_time: datetime,
+    selected_columns: list[str] | None = None,
+) -> bytes:
     selected_points = track_points_between(log, start_time, end_time)
     if not selected_points:
         raise CsvLogError("Selected range does not contain any GPS points.")
+
+    columns = (
+        selected_columns
+        if selected_columns is not None
+        else [column.name for column in log.available_columns]
+    )
+    allowed_columns = {column.name for column in log.available_columns}
+    columns = [column for column in columns if column in allowed_columns]
 
     ET.register_namespace("", GPX_NAMESPACE)
     gpx = ET.Element(
@@ -147,9 +183,11 @@ def export_gpx(log: LogData, start_time: datetime, end_time: datetime) -> bytes:
         time_el.text = format_gpx_time(point.time)
 
         extensions = ET.SubElement(trkpt, f"{{{GPX_NAMESPACE}}}extensions")
-        for extension_name, value in point.values.items():
+        for column_name in columns:
+            value = point.values.get(column_name)
             if value is None:
                 continue
+            extension_name = log.column_tags[column_name]
             child = ET.SubElement(extensions, extension_name)
             child.text = str(value)
 
@@ -168,6 +206,44 @@ def ensure_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
     return value.astimezone(UTC)
+
+
+def sanitize_extension_tag(column_name: str) -> str:
+    tag = column_name.strip().replace("%", " percent ")
+    tag = re.sub(r"[^0-9A-Za-z]+", "_", tag).strip("_").lower()
+    tag = re.sub(r"_+", "_", tag)
+    if tag == "":
+        tag = "value"
+    if tag[0].isdigit():
+        tag = f"col_{tag}"
+    return tag
+
+
+def unique_column_tags(column_names: list[str]) -> dict[str, str]:
+    used: dict[str, int] = {}
+    tags: dict[str, str] = {}
+    for name in column_names:
+        base_tag = sanitize_extension_tag(name)
+        count = used.get(base_tag, 0)
+        used[base_tag] = count + 1
+        tags[name] = base_tag if count == 0 else f"{base_tag}_{count + 1}"
+    return tags
+
+
+def sanitize_download_filename(filename: str) -> str:
+    stem = filename.strip()
+    if stem.lower().endswith(".gpx"):
+        stem = stem[:-4]
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "_", stem).strip("._-")
+    if stem == "":
+        stem = "aligned-log"
+    return f"{stem}.gpx"
+
+
+def default_export_filename(log_name: str, video_name: str) -> str:
+    log_stem = Path(log_name).stem or "log"
+    video_stem = Path(video_name).stem or "video"
+    return sanitize_download_filename(f"{log_stem}_{video_stem}.gpx")
 
 
 def export_filename(

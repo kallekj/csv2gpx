@@ -9,69 +9,106 @@
   <body>
     <main class="shell">
       <section class="workspace">
-        <div class="panel upload-panel">
-          <div class="brand">
-            <span class="brand-mark">GPX</span>
+        <aside class="sidebar">
+          <div class="panel upload-panel">
+            <div class="brand">
+              <span class="brand-mark">GPX</span>
+              <div>
+                <h1>CSV to GPX Alignment</h1>
+                <p>NMEA2000 log trimming for GoPro footage</p>
+              </div>
+            </div>
+
+            <form id="upload-form" class="upload-form">
+              <label>
+                <span>CSV log</span>
+                <input id="log-file" name="log_file" type="file" accept=".csv,.dat" required />
+              </label>
+              <label>
+                <span>Video</span>
+                <input id="video-file" name="video_file" type="file" accept="video/*" required />
+              </label>
+              <div class="button-row">
+                <button id="analyze-button" type="submit">Analyze</button>
+                <button id="cancel-button" type="button" class="secondary" disabled>Cancel</button>
+              </div>
+            </form>
+
+            <div class="progress-shell" aria-hidden="true">
+              <div id="progress-bar" class="progress-bar"></div>
+            </div>
+            <div id="message" class="message" role="status"></div>
+          </div>
+
+          <div class="panel stats-panel">
             <div>
-              <h1>CSV to GPX Alignment</h1>
-              <p>NMEA2000 log trimming for GoPro footage</p>
+              <span class="label">Log</span>
+              <strong id="log-range">-</strong>
+            </div>
+            <div>
+              <span class="label">Video</span>
+              <strong id="video-range">-</strong>
+            </div>
+            <div>
+              <span class="label">Export Range</span>
+              <strong id="export-range">-</strong>
+            </div>
+          </div>
+        </aside>
+
+        <div class="main-content">
+          <div class="panel video-panel">
+            <video id="video" controls playsinline></video>
+            <div class="timeline-panel">
+              <div class="time-row">
+                <span id="current-time">00:00.0</span>
+                <span id="selection-duration">Selection: 00:00.0</span>
+                <span id="video-duration">00:00.0</span>
+              </div>
+              <div id="timeline" class="timeline">
+                <div id="selection-fill" class="selection-fill"></div>
+                <div id="playhead" class="playhead"></div>
+                <input id="in-handle" type="range" min="0" max="0" step="0.1" value="0" disabled />
+                <input id="out-handle" type="range" min="0" max="0" step="0.1" value="0" disabled />
+              </div>
+              <div class="button-row">
+                <button id="set-in" type="button" class="secondary" disabled>Set In</button>
+                <button id="set-out" type="button" class="secondary" disabled>Set Out</button>
+              </div>
             </div>
           </div>
 
-          <form id="upload-form" class="upload-form">
+          <div class="panel controls-panel">
             <label>
-              <span>CSV log</span>
-              <input id="log-file" name="log_file" type="file" accept=".csv,.dat" required />
+              <span>Offset seconds</span>
+              <input id="offset" type="number" step="0.1" value="0" disabled />
             </label>
-            <label>
-              <span>Video</span>
-              <input id="video-file" name="video_file" type="file" accept="video/*" required />
+            <label id="manual-start-field" hidden>
+              <span>Manual log start for selected clip</span>
+              <input id="manual-log-start" type="datetime-local" step="1" disabled />
             </label>
-            <button type="submit">Analyze</button>
-          </form>
-
-          <div id="message" class="message" role="status"></div>
-        </div>
-
-        <div class="panel video-panel">
-          <video id="video" controls playsinline></video>
-        </div>
-
-        <div class="panel stats-panel">
-          <div>
-            <span class="label">Log</span>
-            <strong id="log-range">-</strong>
+            <form id="export-form" class="export-form">
+              <label>
+                <span>Filename</span>
+                <input id="filename" name="filename" type="text" disabled />
+              </label>
+              <button id="export-button" type="submit" disabled>Export GPX</button>
+            </form>
           </div>
-          <div>
-            <span class="label">Video</span>
-            <strong id="video-range">-</strong>
-          </div>
-          <div>
-            <span class="label">Overlap</span>
-            <strong id="overlap">-</strong>
-          </div>
-        </div>
 
-        <div class="panel controls-panel">
-          <label>
-            <span>Offset seconds</span>
-            <input id="offset" type="number" step="0.1" value="0" disabled />
-          </label>
-          <label>
-            <span>Export start</span>
-            <input id="trim-start" type="datetime-local" step="1" disabled />
-          </label>
-          <label>
-            <span>Export end</span>
-            <input id="trim-end" type="datetime-local" step="1" disabled />
-          </label>
-          <form id="export-form">
-            <button id="export-button" type="submit" disabled>Export GPX</button>
-          </form>
-        </div>
-
-        <div class="panel map-panel">
-          <canvas id="track-canvas" width="900" height="520"></canvas>
+          <div class="panel columns-panel">
+            <div class="columns-header">
+              <div>
+                <span class="label">GPX Extension Columns</span>
+                <strong id="column-count">-</strong>
+              </div>
+              <div class="button-row compact">
+                <button id="select-all-columns" type="button" class="secondary" disabled>All</button>
+                <button id="select-no-columns" type="button" class="secondary" disabled>None</button>
+              </div>
+            </div>
+            <div id="columns-list" class="columns-list"></div>
+          </div>
         </div>
       </section>
     </main>

@@ -23,7 +23,6 @@ dist/
 *.egg-info/
 
 # IDE/OS
-.vscode/
 .DS_Store
 
 *.csv
@@ -31,3 +30,13 @@ dist/
 *.DAT
 *.xls
 *.xlsx
+*.mp4
+*.MP4
+*.gpx
+*.mov
+*.MOV
+*.zip
+*.tar.gz
+*.log
+*.bak
+*.tmp

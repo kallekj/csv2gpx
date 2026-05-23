@@ -1,8 +1,11 @@
+import subprocess
 from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
 
 import pytest
 
-from csv2gpx.video import VideoProbeError, parse_ffprobe_json
+from csv2gpx.video import VideoProbeError, parse_ffprobe_json, probe_video
 
 
 def test_parse_ffprobe_json_uses_format_creation_time() -> None:
@@ -47,3 +50,42 @@ def test_parse_ffprobe_json_allows_missing_creation_time() -> None:
 def test_parse_ffprobe_json_requires_duration() -> None:
     with pytest.raises(VideoProbeError):
         parse_ffprobe_json('{"format": {}, "streams": []}')
+
+
+def test_probe_video_handles_ffprobe_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FailedProcess:
+        returncode = 1
+
+        def communicate(self, timeout: float) -> tuple[str, str]:
+            return "", "bad video"
+
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: FailedProcess())
+
+    with pytest.raises(VideoProbeError, match="bad video"):
+        probe_video(Path("video.mp4"))
+
+
+def test_probe_video_kills_timed_out_ffprobe(monkeypatch: pytest.MonkeyPatch) -> None:
+    class SlowProcess:
+        returncode = None
+        killed = False
+
+        def communicate(self, timeout: float | None = None) -> tuple[str, str]:
+            if self.killed:
+                return "", ""
+            raise subprocess.TimeoutExpired(cmd="ffprobe", timeout=timeout or 0)
+
+        def kill(self) -> None:
+            self.killed = True
+
+    process = SlowProcess()
+
+    def fake_popen(*args: Any, **kwargs: Any) -> SlowProcess:
+        return process
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+
+    with pytest.raises(VideoProbeError, match="timed out"):
+        probe_video(Path("video.mp4"), timeout_seconds=0.1)
+
+    assert process.killed is True

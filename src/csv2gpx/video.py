@@ -20,7 +20,7 @@ class VideoProbeError(RuntimeError):
     """Raised when ffprobe cannot read enough video metadata."""
 
 
-def probe_video(path: Path) -> VideoMetadata:
+def probe_video(path: Path, timeout_seconds: float = 30) -> VideoMetadata:
     command = [
         "ffprobe",
         "-v",
@@ -32,14 +32,27 @@ def probe_video(path: Path) -> VideoMetadata:
         str(path),
     ]
     try:
-        result = subprocess.run(command, check=True, capture_output=True, text=True)
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
     except FileNotFoundError as exc:
         raise VideoProbeError("ffprobe is not installed or not available on PATH.") from exc
-    except subprocess.CalledProcessError as exc:
-        detail = exc.stderr.strip() or exc.stdout.strip() or "unknown ffprobe error"
-        raise VideoProbeError(f"ffprobe could not read the video: {detail}") from exc
 
-    return parse_ffprobe_json(result.stdout)
+    try:
+        stdout, stderr = process.communicate(timeout=timeout_seconds)
+    except subprocess.TimeoutExpired as exc:
+        process.kill()
+        process.communicate()
+        raise VideoProbeError("ffprobe timed out while reading the video.") from exc
+
+    if process.returncode != 0:
+        detail = stderr.strip() or stdout.strip() or "unknown ffprobe error"
+        raise VideoProbeError(f"ffprobe could not read the video: {detail}")
+
+    return parse_ffprobe_json(stdout)
 
 
 def parse_ffprobe_json(payload: str) -> VideoMetadata:

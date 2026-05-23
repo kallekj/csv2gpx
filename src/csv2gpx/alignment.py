@@ -21,6 +21,10 @@ class AlignmentResult:
     overlap_seconds: float
 
 
+class AlignmentError(ValueError):
+    """Raised when a video clip cannot be mapped onto the log timeline."""
+
+
 def compute_alignment(
     log: LogData,
     video: VideoMetadata,
@@ -59,3 +63,31 @@ def compute_alignment(
         export_end=export_end if overlap_seconds > 0 else None,
         overlap_seconds=overlap_seconds,
     )
+
+
+def clip_range_to_log_range(
+    alignment: AlignmentResult,
+    clip_start_seconds: float,
+    clip_end_seconds: float,
+    *,
+    manual_log_start: datetime | None = None,
+) -> tuple[datetime, datetime]:
+    if clip_start_seconds < 0 or clip_end_seconds < 0:
+        raise AlignmentError("Clip times must be positive.")
+    if clip_end_seconds <= clip_start_seconds:
+        raise AlignmentError("Clip end must be after clip start.")
+
+    duration = timedelta(seconds=clip_end_seconds - clip_start_seconds)
+    if alignment.video_start is not None:
+        start = alignment.video_start + timedelta(seconds=clip_start_seconds)
+        end = alignment.video_start + timedelta(seconds=clip_end_seconds)
+    elif manual_log_start is not None:
+        start = ensure_utc(manual_log_start)
+        end = start + duration
+    else:
+        raise AlignmentError("Manual log start is required when video start time is missing.")
+
+    if start < alignment.log_start or end > alignment.log_end:
+        raise AlignmentError("Selected video range falls outside the log time range.")
+
+    return start, end

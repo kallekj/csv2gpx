@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import shutil
 import tempfile
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
@@ -16,7 +17,14 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from csv2gpx.alignment import AlignmentResult, compute_alignment
-from csv2gpx.core import CsvLogError, LogData, export_filename, export_gpx, parse_csv_log
+from csv2gpx.core import (
+    CsvLogError,
+    LogData,
+    default_export_filename,
+    export_gpx,
+    parse_csv_log,
+    sanitize_download_filename,
+)
 from csv2gpx.video import VideoMetadata, VideoProbeError, probe_video
 
 PACKAGE_DIR = Path(__file__).resolve().parent
@@ -35,7 +43,23 @@ class SessionState:
     video: VideoMetadata
 
 
+@dataclass
+class JobState:
+    id: str
+    directory: Path
+    log_path: Path
+    video_path: Path
+    video_filename: str
+    status: str = "queued"
+    progress: int = 0
+    message: str = "Queued"
+    error: str | None = None
+    session_id: str | None = None
+    task: asyncio.Task[None] | None = field(default=None, repr=False)
+
+
 SESSIONS: dict[str, SessionState] = {}
+JOBS: dict[str, JobState] = {}
 
 
 def create_app() -> FastAPI:
@@ -46,8 +70,8 @@ def create_app() -> FastAPI:
     async def index(request: Request) -> Response:
         return TEMPLATES.TemplateResponse(request, "index.html")
 
-    @app.post("/api/session")
-    async def create_session(
+    @app.post("/api/jobs")
+    async def create_job(
         log_file: Annotated[UploadFile, File()],
         video_file: Annotated[UploadFile, File()],
     ) -> dict[str, object]:
@@ -62,35 +86,66 @@ def create_app() -> FastAPI:
         if Path(log_name).suffix.lower() != ".csv":
             raise HTTPException(status_code=400, detail="Only CSV log uploads are supported in v1.")
 
-        session_id = uuid.uuid4().hex
-        session_dir = UPLOAD_ROOT / session_id
-        session_dir.mkdir(parents=True, exist_ok=True)
-        log_path = session_dir / safe_upload_name(log_name)
-        video_path = session_dir / safe_upload_name(video_name)
+        job_id = uuid.uuid4().hex
+        job_dir = UPLOAD_ROOT / job_id
+        job_dir.mkdir(parents=True, exist_ok=True)
+        log_path = job_dir / safe_upload_name(log_name)
+        video_path = job_dir / safe_upload_name(video_name)
 
         await save_upload(log_file, log_path)
         await save_upload(video_file, video_path)
 
-        try:
-            log = parse_csv_log(log_path)
-            video = probe_video(video_path)
-        except CsvLogError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except VideoProbeError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-        state = SessionState(
-            id=session_id,
-            directory=session_dir,
-            log=log,
+        job = JobState(
+            id=job_id,
+            directory=job_dir,
             log_path=log_path,
             video_path=video_path,
             video_filename=video_name,
-            video=video,
+            status="analyzing",
+            progress=55,
+            message="Analyzing log and video",
         )
-        SESSIONS[session_id] = state
+        JOBS[job_id] = job
+        job.task = asyncio.create_task(analyze_job(job))
+        return job_payload(job)
 
-        return session_payload(state, compute_alignment(log, video))
+    @app.post("/api/session")
+    async def create_session_legacy(
+        log_file: Annotated[UploadFile, File()],
+        video_file: Annotated[UploadFile, File()],
+    ) -> dict[str, object]:
+        job_response = await create_job(log_file, video_file)
+        job_id = str(job_response["jobId"])
+        while True:
+            job = get_job(job_id)
+            if job.status == "ready" and job.session_id is not None:
+                return session_payload(
+                    SESSIONS[job.session_id],
+                    compute_alignment_for_session(job.session_id),
+                )
+            if job.status == "failed":
+                raise HTTPException(status_code=400, detail=job.error or "Analysis failed.")
+            if job.status == "cancelled":
+                raise HTTPException(status_code=400, detail="Analysis was cancelled.")
+            await asyncio.sleep(0.02)
+
+    @app.get("/api/jobs/{job_id}")
+    async def job_status(job_id: str) -> dict[str, object]:
+        return job_payload(get_job(job_id))
+
+    @app.delete("/api/jobs/{job_id}")
+    async def cancel_job(job_id: str) -> dict[str, object]:
+        job = get_job(job_id)
+        if job.status not in {"ready", "failed", "cancelled"}:
+            job.status = "cancelled"
+            job.progress = 0
+            job.message = "Cancelled"
+            if job.task is not None:
+                job.task.cancel()
+        if job.session_id is not None:
+            SESSIONS.pop(job.session_id, None)
+        shutil.rmtree(job.directory, ignore_errors=True)
+        return job_payload(job)
 
     @app.get("/api/session/{session_id}/alignment")
     async def alignment(session_id: str, offset_seconds: float = 0) -> dict[str, object]:
@@ -107,6 +162,8 @@ def create_app() -> FastAPI:
         session_id: Annotated[str, Form()],
         start_time: Annotated[str, Form()],
         end_time: Annotated[str, Form()],
+        filename: Annotated[str, Form()] = "",
+        selected_columns: Annotated[list[str] | None, Form()] = None,
     ) -> Response:
         state = get_session(session_id)
         start = parse_iso_utc(start_time)
@@ -115,12 +172,14 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail="Export end time must be after start time.")
 
         try:
-            content = export_gpx(state.log, start, end)
+            content = export_gpx(state.log, start, end, selected_columns or [])
         except CsvLogError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-        filename = export_filename(state.video_filename, state.log_path.name, start, end)
-        headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+        download_name = sanitize_download_filename(
+            filename or default_export_filename(state.log_path.name, state.video_filename)
+        )
+        headers = {"Content-Disposition": f'attachment; filename="{download_name}"'}
         return Response(content=content, media_type="application/gpx+xml", headers=headers)
 
     @app.get("/video/{session_id}")
@@ -129,6 +188,52 @@ def create_app() -> FastAPI:
         return FileResponse(state.video_path)
 
     return app
+
+
+async def analyze_job(job: JobState) -> None:
+    try:
+        job.status = "analyzing"
+        job.progress = 65
+        job.message = "Parsing CSV log"
+        log = parse_csv_log(job.log_path)
+        if job.status == "cancelled":
+            return
+
+        job.progress = 80
+        job.message = "Reading video metadata"
+        video = probe_video(job.video_path)
+        if job.status == "cancelled":
+            return
+
+        session_id = uuid.uuid4().hex
+        SESSIONS[session_id] = SessionState(
+            id=session_id,
+            directory=job.directory,
+            log=log,
+            log_path=job.log_path,
+            video_path=job.video_path,
+            video_filename=job.video_filename,
+            video=video,
+        )
+        job.session_id = session_id
+        job.status = "ready"
+        job.progress = 100
+        job.message = "Ready"
+    except asyncio.CancelledError:
+        job.status = "cancelled"
+        job.progress = 0
+        job.message = "Cancelled"
+        raise
+    except (CsvLogError, VideoProbeError) as exc:
+        job.status = "failed"
+        job.progress = 100
+        job.error = str(exc)
+        job.message = "Analysis failed"
+
+
+def compute_alignment_for_session(session_id: str) -> AlignmentResult:
+    state = get_session(session_id)
+    return compute_alignment(state.log, state.video)
 
 
 async def save_upload(upload: UploadFile, destination: Path) -> None:
@@ -150,6 +255,27 @@ def get_session(session_id: str) -> SessionState:
         raise HTTPException(status_code=404, detail="Upload session was not found.") from exc
 
 
+def get_job(job_id: str) -> JobState:
+    try:
+        return JOBS[job_id]
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Analysis job was not found.") from exc
+
+
+def job_payload(job: JobState) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "jobId": job.id,
+        "status": job.status,
+        "progress": job.progress,
+        "message": job.message,
+        "error": job.error,
+    }
+    if job.status == "ready" and job.session_id is not None:
+        state = SESSIONS[job.session_id]
+        payload["session"] = session_payload(state, compute_alignment(state.log, state.video))
+    return payload
+
+
 def session_payload(state: SessionState, alignment: AlignmentResult) -> dict[str, object]:
     return {
         "sessionId": state.id,
@@ -159,7 +285,16 @@ def session_payload(state: SessionState, alignment: AlignmentResult) -> dict[str
             "pointCount": len(state.log.points),
             "start": iso_or_none(state.log.start_time),
             "end": iso_or_none(state.log.end_time),
-            "preview": track_preview(state.log),
+            "defaultFilename": default_export_filename(state.log_path.name, state.video_filename),
+            "availableColumns": [
+                {
+                    "name": column.name,
+                    "tag": column.tag,
+                    "numericCount": column.numeric_count,
+                    "selected": column.selected,
+                }
+                for column in state.log.available_columns
+            ],
         },
         "video": {
             "filename": state.video_filename,
@@ -175,16 +310,6 @@ def session_payload(state: SessionState, alignment: AlignmentResult) -> dict[str
             "overlapSeconds": alignment.overlap_seconds,
         },
     }
-
-
-def track_preview(log: LogData, limit: int = 600) -> list[dict[str, float]]:
-    if len(log.points) <= limit:
-        points = log.points
-    else:
-        step = len(log.points) / limit
-        points = [log.points[int(index * step)] for index in range(limit)]
-
-    return [{"lat": point.lat, "lon": point.lon} for point in points]
 
 
 def iso_or_none(value: datetime | None) -> str | None:
@@ -208,6 +333,10 @@ def parse_iso_utc(value: str) -> datetime:
 
 
 def cleanup_sessions() -> None:
+    for job in JOBS.values():
+        if job.task is not None and not job.task.done():
+            job.task.cancel()
     for state in SESSIONS.values():
         shutil.rmtree(state.directory, ignore_errors=True)
     SESSIONS.clear()
+    JOBS.clear()
