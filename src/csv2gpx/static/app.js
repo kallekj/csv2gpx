@@ -317,7 +317,7 @@ function renderColumns(columns) {
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
     checkbox.value = column.name;
-    checkbox.checked = Object.hasOwn(preferences, column.name)
+    checkbox.checked = Object.prototype.hasOwnProperty.call(preferences, column.name)
       ? preferences[column.name]
       : true;
     checkbox.addEventListener("change", saveColumnPreferences);
